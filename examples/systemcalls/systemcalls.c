@@ -1,5 +1,10 @@
 #include "systemcalls.h"
- #include <stdlib.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <signal.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -51,7 +56,7 @@ bool do_exec(int count, ...)
     command[count] = NULL;
     // this line is to avoid a compile warning before your implementation is complete
     // and may be removed
-    command[count] = command[count];
+    //command[count] = command[count];
 
 /*
  * TODO:
@@ -62,11 +67,35 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    int status;
+    pid_t pid;
+    pid = fork();
+    if (pid == -1) // no child process is created
+    {
+        va_end(args);
+        return false;
+    }
+    else if (pid == 0) // code for child
+    {
+        execv(command[0], command);
+        exit(EXIT_FAILURE); // fall back if execv fails. When execv completes successfully, it doesn't return
+    } // end of child code
+
+    if (waitpid(pid, &status, 0) == -1) // back to parent, if call to waitpid fails
+    {
+        va_end(args);
+        return false; // waitpid failed
+    }
+    else if (WIFEXITED(status))
+    {
+        va_end(args);
+        return WEXITSTATUS(status) == 0;
+    }
 
     va_end(args);
-
-    return true;
+    return false;
 }
+
 
 /**
 * @param outputfile - The full path to the file to write with command output.
@@ -96,8 +125,47 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+   int fd = open(outputfile, O_WRONLY | O_TRUNC | O_CREAT, 0644);
+    if (fd < 0) {
+        perror("open");
+        va_end(args);
+        return false;
+    }
+
+    pid_t childpid = fork();
+    if (childpid == -1) {
+        perror("fork");
+        close(fd);
+        va_end(args);
+        return false;
+    }
+
+    if (childpid == 0) { // Child process
+        if (dup2(fd, STDOUT_FILENO) < 0) {
+            perror("dup2");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+
+       close(fd);
+        execv(command[0], command);
+        perror("execv"); // execv only returns if there is an error
+        exit(EXIT_FAILURE);
+    }
+
+    // Parent process
+    close(fd);
+    int status;
+    if (waitpid(childpid, &status, 0) == -1) {
+        perror("waitpid");
+        va_end(args);
+        return false;
+    }
 
     va_end(args);
+    if (WIFEXITED(status)) {
+        return WEXITSTATUS(status) == 0;
+    }
 
-    return true;
+    return false;
 }
