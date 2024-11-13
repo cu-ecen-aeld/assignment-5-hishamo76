@@ -1,48 +1,54 @@
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/syslog.h>
-#include <fcntl.h>
-#include <errno.h>
+#include <syslog.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-
-
+#include <errno.h>
+#include <libgen.h>
 
 int main(int argc, char *argv[])
 {
-    // Replace printf with syslog
+    openlog("writer", LOG_PID, LOG_USER);
 
-    openlog("writer app", LOG_PID | LOG_CONS, LOG_USER);
-    if (argc != 3)
-    {
-        syslog(LOG_ERR, "use: ./writer writefile writestr");
-        syslog(LOG_ERR, "writefile: the path including the filename");
-        syslog(LOG_ERR, "writestr the string to be written");
+    if (argc != 3) {
+        fprintf(stderr, "Incorrect number of arguments, must be equal 2.\n");
+        syslog(LOG_ERR, "Incorrect number of arguments, must be equal 2.");
+        closelog();
         return 1;
     }
-    syslog(LOG_ERR, "Opening file %s", argv[1]);
-    int fd = creat(argv[1], 0644);    
-    if (fd == 1)
-        syslog(LOG_ERR, "Unable to open file: %s", argv[1]);
-    else{
-    
-        syslog(LOG_DEBUG, "writing string <%s> to file <%s>", argv[2], argv[1]);
-        int len = strlen(argv[2]);
-        ssize_t ret;
-        while (len != 0 && (ret = write (fd, argv[2], len)) != 0)
-        {
-            if (ret == -1) {
-                if (errno == EINTR)
-                    continue;
-                syslog(LOG_ERR, "%s","write");
-                break;
-            }
-            len -= ret;
-            argv[2] += ret; 
-        }
+
+    char *writefile = argv[1];
+    char *writestr = argv[2];
+
+    char *dirpath = strdup(writefile);
+    if (dirpath == NULL) {
+        syslog(LOG_ERR, "Error allocating memory.");
+        closelog();
+        return 1;
     }
-    syslog(LOG_DEBUG, "Closing file %s", argv[1]);
-    close(fd);
+    dirpath = dirname(dirpath);
+
+    FILE *file = fopen(writefile, "w");
+    if (file == NULL) {
+        syslog(LOG_ERR, "Error creating file '%s': %s", writefile, strerror(errno));
+        free(dirpath);
+        closelog();
+        return 1;
+    }
+
+    if (fprintf(file, "%s", writestr) < 0) {
+        syslog(LOG_ERR, "Error writting to file '%s': %s", writefile, strerror(errno));
+        fclose(file);
+        free(dirpath);
+        closelog();
+        return 1;
+    } else {
+        syslog(LOG_DEBUG, "Writting %s to %s", writestr, writefile);
+    }
+
+    fclose(file);
+    free(dirpath);
     closelog();
-return 0; 
+
+    return 0;
+
 }
